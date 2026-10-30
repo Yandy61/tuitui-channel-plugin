@@ -74,3 +74,21 @@ claude 工具审批 → notifications/claude/channel/permission_request → 转�
 - Node.js ≥ 22（仓库为 ESM）
 - Claude Code ≥ 2.1.224（`--dangerously-load-development-channels` 参数）
 - 推推开放平台机器人的 appid + secret
+
+## 首次克隆后必做
+
+`node_modules/` 不入库（.gitignore 排除），克隆后必须先装依赖，否则 tui-new 启动的 MCP server 缺 `@modelcontextprotocol/sdk`、`ws`、`zod` 直接起不来（表现为收不到机器人消息，bot 目录 `.state/boot.log` 里有报错）：
+
+```bash
+cd tuitui-channel && npm install && cd ..
+```
+
+## 排查收不到消息
+
+按顺序看 `bots/<bot名>/.state/` 下的日志：
+
+1. `boot.log` — server 是否启动、依赖是否加载成功（缺依赖会在这里报 Cannot find module）
+2. WS 是否连上（boot.log 有 "websocket connected"）；401 说明 appid/secret 不对
+3. `notify-trace.log` — 消息是否到达、被白名单拦截（reason=dm_allowlist / pairing_required）
+4. 白名单默认 allowlist：首次用 `tui_access` 工具 `allow` 你的账号，或编辑 `.state/access.json` 的 `allowFrom`
+5. `tui-status` 一眼看收件数/未读/最后消息时间
