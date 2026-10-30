@@ -1,0 +1,4 @@
+node_modules/
+bots/*/.state/
+bots/*/.mcp.json
+*.log

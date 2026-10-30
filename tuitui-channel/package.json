@@ -1,0 +1,15 @@
+{
+  "name": "claude-tuitui-channel",
+  "version": "0.1.0",
+  "description": "Claude Code MCP server for Tuitui IM channel",
+  "type": "module",
+  "main": "cli.mjs",
+  "bin": {
+    "tuitui-channel": "./cli.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ws": "^8.16.0",
+    "zod": "^3.22.0"
+  }
+}

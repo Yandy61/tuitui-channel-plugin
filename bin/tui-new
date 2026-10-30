@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# tui-new — 一键新开一个推推机器人接入的 Claude Code 会话
+#
+# 用法:
+#   tui-new <bot名称> <APP_ID> <APP_SECRET> [claude 参数...]
+#
+# 示例:
+#   tui-new bot3 4013402415 a12aebd0c52e...
+#   tui-new bot4 249010058 3aae3072... --model opus
+#
+# 效果:
+#   1. 在 bots/<bot名称>/ 下生成 .mcp.json（不存在时），STATE_DIR 独立隔离
+#   2. 启动 claude 会话，接入对应机器人
+#   3. 同一 bot 重复调用 = 恢复/续用同一个机器人（复用已有 .mcp.json 和 .state）
+#
+# 复用同一份 channel 代码（tuitui-channel/），机器人之间互不影响。
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CHANNEL_DIR="$ROOT/tuitui-channel"
+BOTS_DIR="$ROOT/bots"
+
+if [[ $# -lt 3 ]]; then
+  sed -n '3,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit 1
+fi
+
+BOT_NAME="$1"; shift
+APP_ID="$1"; shift
+APP_SECRET="$1"; shift
+
+if [[ ! "$BOT_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "[tui-new] bot名称只能包含字母/数字/下划线/横线: $BOT_NAME" >&2
+  exit 1
+fi
+
+BOT_DIR="$BOTS_DIR/$BOT_NAME"
+mkdir -p "$BOT_DIR"
+
+MCP_JSON="$BOT_DIR/.mcp.json"
+if [[ ! -f "$MCP_JSON" ]]; then
+  cat > "$MCP_JSON" <<EOF
+{
+  "mcpServers": {
+    "tuitui": {
+      "command": "node",
+      "args": ["$CHANNEL_DIR/server/boot.mjs"],
+      "env": {
+        "TUITUI_APP_ID": "$APP_ID",
+        "TUITUI_APP_SECRET": "$APP_SECRET",
+        "TUITUI_STATE_DIR": "$BOT_DIR/.state",
+        "TUITUI_DM_POLICY": "allowlist",
+        "TUITUI_GROUP_POLICY": "allowlist",
+        "TUITUI_REQUIRE_MENTION": "true",
+        "TUITUI_CHANNEL_CONTEXT": "thread",
+        "TUITUI_AUTO_REPLY": "true"
+      }
+    }
+  }
+}
+EOF
+  chmod 600 "$MCP_JSON"
+  echo "[tui-new] 已创建 $MCP_JSON"
+else
+  echo "[tui-new] 复用已有配置 $MCP_JSON（如需换 appid/secret 请手工编辑）"
+fi
+
+if [[ ! -f "$CHANNEL_DIR/server/index.mjs" ]]; then
+  echo "[tui-new] 错误: 找不到 $CHANNEL_DIR/server/index.mjs" >&2
+  exit 1
+fi
+
+# 每个机器人一份 CLAUDE.md（留在 bot 目录，不污染工作目录）：
+# 会话启动时通过 --append-system-prompt 注入内容，工作目录保持为用户执行命令的位置
+CLAUDE_MD="$BOT_DIR/CLAUDE.md"
+cat > "$CLAUDE_MD" <<'EOF'
+# 推推机器人会话
+
+你正在通过推推（TuiTui）IM 机器人与用户对话：
+
+- 用户消息经 tuitui MCP 的 `notifications/claude/channel` 注入，你看到消息时应该**直接调用 tuitui_reply 工具回复**，回复目标用消息 meta 里的 chat_id / sender_id。
+- 收发相关的 MCP 工具：`tuitui_reply`（回消息）、`tuitui_send_media`（发文件/图片）、`tuitui_react`（表情回应）、`tuitui_get_messages`（读收件箱）、`tuitui_check_new`（查未读）、`tuitui_debug_status`（链路排障）。
+- 回复用简体中文，简短口语化，不要用 markdown 表格（推推不渲染）。
+
+## 白名单 / 配对（用户说收不到回复或"加白名单"时）
+
+访问控制状态在 $BOT_DIR/.state/access.json，用 `tuitui_access` 工具管理：
+- `action=status` 查看当前 DM 策略和白名单
+- `action=allow, sender_id=<对方账号>` 把用户加入 DM 白名单（最常用）
+- `action=policy, value=allowlist|open|pairing|disabled` 切换 DM 策略
+- `action=group-allow, value=<群id>` 放行群聊
+- sender_id 取自用户消息 meta 里的 sender_id / user_account 字段
+EOF
+echo "[tui-new] 已写入 $CLAUDE_MD"
+
+echo "[tui-new] 启动 claude 会话，bot=$BOT_NAME state=$BOT_DIR/.state cwd=$(pwd)"
+# 不 cd：工作目录 = 用户执行 tui-new 的目录
+# 机器人身份说明用 --append-system-prompt 注入（内容即 bot 目录下的 CLAUDE.md）
+# 默认免审批模式；用户额外传的参数在后，可覆盖默认行为
+exec claude --mcp-config "$MCP_JSON" \
+  --dangerously-load-development-channels server:tuitui \
+  --enable-auto-mode --dangerously-skip-permissions \
+  --append-system-prompt "$(cat "$CLAUDE_MD")" "$@"
+

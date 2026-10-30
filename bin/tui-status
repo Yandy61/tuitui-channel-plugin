@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# tui-status — 查看所有推推机器人的接入状态
+# 列出 bots/ 下每个机器人的 appid、白名单、收发消息统计、最新活动时间
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BOTS_DIR="$ROOT/bots"
+
+if [[ ! -d "$BOTS_DIR" ]] || [[ -z "$(ls -A "$BOTS_DIR" 2>/dev/null)" ]]; then
+  echo "尚无机器人。用 tui-new <bot名称> <APP_ID> <APP_SECRET> 创建第一个。"
+  exit 0
+fi
+
+printf "%-12s %-12s %-10s %-8s %-8s %s\n" "BOT" "APP_ID" "DM策略" "收件" "未读" "最后消息时间"
+for d in "$BOTS_DIR"/*/; do
+  name=$(basename "$d")
+  mcp="$d/.mcp.json"
+  state="$d/.state"
+  app_id="-"; dm="-"; total="-"; unread="-"; last="-"
+  [[ -f "$mcp" ]] && app_id=$(grep -o '"TUITUI_APP_ID": "[^"]*"' "$mcp" | head -1 | cut -d'"' -f4)
+  if [[ -f "$state/access.json" ]]; then
+    dm=$(node -e "try{const a=require('$state/access.json');console.log(a.dmPolicy||'-')}catch{console.log('-')}")
+  fi
+  if [[ -f "$state/inbox.jsonl" ]]; then
+    total=$(wc -l < "$state/inbox.jsonl")
+    unread=$(grep -vc '"readAt":[0-9]' "$state/inbox.jsonl" 2>/dev/null || true)
+    [[ "$unread" == "" ]] && unread=0
+    last=$(tail -1 "$state/inbox.jsonl" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.timestamp||'-')}catch{console.log('-')}})")
+  fi
+  printf "%-12s %-12s %-10s %-8s %-8s %s\n" "$name" "$app_id" "$dm" "$total" "$unread" "$last"
+done

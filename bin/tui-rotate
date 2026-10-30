@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# tui-rotate — 轮转/清理各机器人 .state 下只增不减的日志文件
+# raw-events.jsonl（已实测单实例涨到 397MB~846MB）只用于排障，可直接清空
+# 用法: tui-rotate [上限MB，默认100]   超过上限的文件清空，未超的保留
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MAX_MB="${1:-100}"
+for f in "$ROOT"/bots/*/.state/raw-events.jsonl "$ROOT"/bots/*/.state/notify-trace.log "$ROOT"/bots/*/.state/boot.log; do
+  [[ -f "$f" ]] || continue
+  size_mb=$(( $(stat -c %s "$f") / 1024 / 1024 ))
+  if (( size_mb >= MAX_MB )); then
+    : > "$f"
+    echo "cleared ($size_mb MB): $f"
+  else
+    echo "kept    ($size_mb MB): $f"
+  fi
+done
