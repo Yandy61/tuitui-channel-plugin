@@ -297,6 +297,45 @@ export async function sendMediaMsg(account, chatId, chatType, mediaUrl) {
   );
 }
 
+// Page message: HTML rendered inline by the TuiTui client. Content must be
+// fully self-contained (inline CSS, no external resources), <= 100KB.
+// See tuitui-robot-guide-v3.md §8. Response carries page_id; page messages
+// cannot be read back via message sync.
+export async function sendPageMsg(account, chatId, chatType, title, html, summary) {
+  if (Buffer.byteLength(html, "utf8") > 100 * 1024)
+    throw new Error(`page content exceeds 100KB (${Buffer.byteLength(html, "utf8")} bytes)`);
+  const page = {
+    title: String(title || "").slice(0, 100),
+    content: html,
+    format: "html",
+    privilege: "specific",
+    delims_left: "{{",
+    delims_right: "}}",
+  };
+  if (summary) page.summary = String(summary).slice(0, 600);
+  return postJson(
+    account,
+    "/robot/message/custom/send",
+    {
+      ...getTargets(chatId, chatType),
+      msgtype: "page",
+      page,
+    },
+    "tuitui.send.page",
+  );
+}
+
+// Update an already-sent page card's content by page_id (no tousers needed).
+export async function updatePageMsg(account, pageId, html) {
+  return postJson(
+    account,
+    "/robot/message/custom/send",
+    { msgtype: "page", page: { page_id: pageId, content: html } },
+    "tuitui.update.page",
+  );
+}
+
+
 export async function emojiReaction(
   account,
   target,

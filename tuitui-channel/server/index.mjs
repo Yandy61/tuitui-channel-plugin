@@ -20,6 +20,8 @@ import {
   buildMessageBody,
   sendTextMsg,
   sendMediaMsg,
+  sendPageMsg,
+  updatePageMsg,
   emojiReaction,
   guessChatType,
   teamsBuildChatId,
@@ -510,6 +512,12 @@ async function persistPermissionAllow(envelope, requestId) {
 
 async function handleInboundJson(json) {
   const envelope = buildInboundEnvelope(json);
+  // Presence events (user opened the chat window) carry no content —
+  // forwarding them would wake the session for nothing. Skip them entirely,
+  // same as daemon.mjs does.
+  if (envelope.event === "single_chat_open" || !envelope.text) {
+    return;
+  }
   const eventId = json?.event_id || json?.header?.event_id || "";
   const dedupeKey = [
     eventId,
@@ -679,6 +687,84 @@ server.registerTool(
       media_url,
     );
     return { content: [{ type: "text", text: `Media sent to ${chat_id}` }] };
+  },
+);
+
+server.registerTool(
+  "tuitui_send_page",
+  {
+    description:
+      "Send an HTML page card to a TuiTui conversation. The client renders the HTML inline (no hosting needed). CSS must be fully inline; no external scripts/styles/images; content <= 100KB.",
+    inputSchema: {
+      chat_id: z.string(),
+      title: z.string().describe("card title, <= 100 chars"),
+      html: z
+        .string()
+        .optional()
+        .describe("full HTML content as a string"),
+      html_file: z
+        .string()
+        .optional()
+        .describe("local path to an HTML file (used when html is omitted)"),
+      summary: z
+        .string()
+        .optional()
+        .describe("card summary, <= 600 chars"),
+      chat_type: z
+        .enum([CHAT_TYPE_DIRECT, CHAT_TYPE_GROUP, CHAT_TYPE_CHANNEL])
+        .optional(),
+    },
+  },
+  async ({ chat_id, title, html, html_file, summary, chat_type }) => {
+    let content = html;
+    if (!content && html_file) {
+      const { readFileSync, statSync } = await import("node:fs");
+      if (statSync(html_file).size > 100 * 1024)
+        throw new Error(`html_file exceeds 100KB: ${html_file}`);
+      content = readFileSync(html_file, "utf8");
+    }
+    if (!content) throw new Error("provide html or html_file");
+    const resp = await sendPageMsg(
+      account,
+      chat_id,
+      chat_type || guessChatType(chat_id),
+      title,
+      content,
+      summary,
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Page sent to ${chat_id} (page_id=${resp?.page_id || "unknown"})`,
+        },
+      ],
+    };
+  },
+);
+
+server.registerTool(
+  "tuitui_update_page",
+  {
+    description:
+      "Update the content of a previously sent page card by page_id (title/tousers unchanged).",
+    inputSchema: {
+      page_id: z.string(),
+      html: z.string().describe("new full HTML content"),
+      html_file: z.string().optional().describe("local path to an HTML file"),
+    },
+  },
+  async ({ page_id, html, html_file }) => {
+    let content = html;
+    if (!content && html_file) {
+      const { readFileSync, statSync } = await import("node:fs");
+      if (statSync(html_file).size > 100 * 1024)
+        throw new Error(`html_file exceeds 100KB: ${html_file}`);
+      content = readFileSync(html_file, "utf8");
+    }
+    if (!content) throw new Error("provide html or html_file");
+    await updatePageMsg(account, page_id, content);
+    return { content: [{ type: "text", text: `Page ${page_id} updated` }] };
   },
 );
 
